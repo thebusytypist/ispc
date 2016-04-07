@@ -58,8 +58,6 @@
 #include <set>
 #include <sstream>
 #include <iostream>
-#include <llvm/ExecutionEngine/GenericValue.h>
-#include <llvm/ExecutionEngine/MCJIT.h>
 #ifdef ISPC_NVPTX_ENABLED
 #include <map>
 #endif /* ISPC_NVPTX_ENABLED */
@@ -130,8 +128,6 @@
 #include <llvm/Support/Host.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Bitcode/ReaderWriter.h>
-
-#include <llvm/Support/MemoryBuffer.h>
 
 /*! list of files encountered by the parser. this allows emitting of
     the module file's dependencies via the -MMM option */
@@ -390,11 +386,9 @@ Module::Module(const char *fn) {
     symbolTable = new SymbolTable;
     ast = new AST;
 
-    executionEngine = NULL;
-
     lDeclareSizeAndPtrIntTypes(symbolTable);
 
-    module = std::make_unique<llvm::Module>(filename ? filename : "<stdin>", *g->ctx);
+    module = new llvm::Module(filename ? filename : "<stdin>", *g->ctx);
     module->setTargetTriple(g->target->GetTripleString());
 
     // DataLayout information supposed to be managed in single place in Target class.
@@ -452,7 +446,7 @@ extern YY_BUFFER_STATE yy_create_buffer(FILE *, int);
 extern void yy_delete_buffer(YY_BUFFER_STATE);
 
 int
-Module::compile(std::unique_ptr<llvm::MemoryBuffer> srcbuf) {
+Module::CompileFile() {
     extern void ParserInit();
     ParserInit();
 
@@ -460,23 +454,45 @@ Module::compile(std::unique_ptr<llvm::MemoryBuffer> srcbuf) {
     // function ends up calling into routines that expect the global
     // variable 'm' to be initialized and available (which it isn't until
     // the Module constructor returns...)
-    DefineStdlib(symbolTable, g->ctx, module.get(), g->includeStdlib);
+    DefineStdlib(symbolTable, g->ctx, module, g->includeStdlib);
 
     bool runPreprocessor = g->runCPP;
 
     if (runPreprocessor) {
+        if (filename != NULL) {
+            // Try to open the file first, since otherwise we crash in the
+            // preprocessor if the file doesn't exist.
+            FILE *f = fopen(filename, "r");
+            if (!f) {
+                perror(filename);
+                return 1;
+            }
+            fclose(f);
+        }
+
         std::string buffer;
         llvm::raw_string_ostream os(buffer);
-
-        execPreprocessor(srcbuf.release(), &os);
+        execPreprocessor((filename != NULL) ? filename : "-", &os);
         YY_BUFFER_STATE strbuf = yy_scan_string(os.str().c_str());
         yyparse();
         yy_delete_buffer(strbuf);
     }
     else {
-        YY_BUFFER_STATE strbuf = yy_scan_string(srcbuf->getBufferStart());
+        // No preprocessor, just open up the file if it's not stdin..
+        FILE* f = NULL;
+        if (filename == NULL)
+            f = stdin;
+        else {
+            f = fopen(filename, "r");
+            if (f == NULL) {
+                perror(filename);
+                return 1;
+            }
+        }
+        yyin = f;
+        yy_switch_to_buffer(yy_create_buffer(yyin, 4096));
         yyparse();
-        yy_delete_buffer(strbuf);
+        fclose(f);
     }
 
     ast->GenerateIR();
@@ -484,55 +500,11 @@ Module::compile(std::unique_ptr<llvm::MemoryBuffer> srcbuf) {
     if (diBuilder)
         diBuilder->finalize();
     if (errorCount == 0)
-        Optimize(module.get(), g->opt.level);
+        Optimize(module, g->opt.level);
 
     return errorCount;
 }
 
-int
-Module::CompileFile() {
-    if (filename != NULL) {
-        // Try to open the file first, since otherwise we crash in the
-        // preprocessor if the file doesn't exist.
-        FILE *f = fopen(filename, "r");
-        if (!f) {
-            perror(filename);
-            return 1;
-        }
-        fclose(f);
-
-        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> errorOrSrcbuf =
-            llvm::MemoryBuffer::getFile(filename);
-        Assert(!errorOrSrcbuf.getError());
-        return compile(std::move(errorOrSrcbuf.get()));
-    }
-    else {
-        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> errorOrSrcbuf =
-            llvm::MemoryBuffer::getSTDIN();
-        Assert(!errorOrSrcbuf.getError());
-        return compile(std::move(errorOrSrcbuf.get()));
-    }
-}
-
-int Module::CompileAndJIT(const char* src) {
-    std::unique_ptr<llvm::MemoryBuffer> srcbuf =
-        llvm::MemoryBuffer::getMemBuffer(src);
-    
-    int ec = compile(std::move(srcbuf));
-
-    if (ec == 0) {
-        executionEngine = llvm::EngineBuilder(std::move(module))
-            .setEngineKind(llvm::EngineKind::JIT)
-            .create();
-        executionEngine->finalizeObject();
-    }
-    
-    return ec;
-}
-
-uint64_t Module::GetFunctionAddress(const std::string& name) {
-    return executionEngine->getFunctionAddress(name);
-}
 
 void
 Module::AddTypeDef(const std::string &name, const Type *type,
@@ -1015,7 +987,7 @@ Module::AddFunctionDeclaration(const std::string &name,
     }
     llvm::Function *function =
         llvm::Function::Create(llvmFunctionType, linkage, functionName.c_str(),
-                               module.get());
+                               module);
 
 #ifdef ISPC_IS_WINDOWS
     // Make export functions callable from DLLS.
@@ -1188,7 +1160,7 @@ bool
 Module::writeOutput(OutputType outputType, const char *outFileName,
                     const char *includeFileName, DispatchHeaderInfo *DHI) {
     if (diBuilder && (outputType != Header) && (outputType != Deps))
-        lStripUnusedDebugInfo(module.get());
+        lStripUnusedDebugInfo(module);
 
 #if ISPC_LLVM_VERSION >= ISPC_LLVM_3_4 /* 3.4+ */
     // In LLVM_3_4 after r195494 and r195504 revisions we should pass
@@ -1288,7 +1260,7 @@ Module::writeOutput(OutputType outputType, const char *outFileName,
     else if (outputType == DevStub)
       return writeDevStub(outFileName);
     else if (outputType == Bitcode)
-        return writeBitcode(module.get(), outFileName);
+        return writeBitcode(module, outFileName);
     else if (outputType == CXX) {
         if (g->target->getISA() != Target::GENERIC) {
             Error(SourcePos(), "Only \"generic-*\" targets can be used with "
@@ -1297,7 +1269,7 @@ Module::writeOutput(OutputType outputType, const char *outFileName,
         }
         extern bool WriteCXXFile(llvm::Module *module, const char *fn,
                                  int vectorWidth, const char *includeName);
-        return WriteCXXFile(module.get(), outFileName, g->target->getVectorWidth(),
+        return WriteCXXFile(module, outFileName, g->target->getVectorWidth(),
                             includeFileName);
     }
     else
@@ -1459,7 +1431,7 @@ Module::writeBitcode(llvm::Module *module, const char *outFileName) {
 bool
 Module::writeObjectFileOrAssembly(OutputType outputType, const char *outFileName) {
     llvm::TargetMachine *targetMachine = g->target->GetTargetMachine();
-    return writeObjectFileOrAssembly(targetMachine, module.get(), outputType,
+    return writeObjectFileOrAssembly(targetMachine, module, outputType,
                                      outFileName);
 }
 
@@ -2447,7 +2419,7 @@ Module::writeDispatchHeader(DispatchHeaderInfo *DHI) {
 }
 
 void
-Module::execPreprocessor(llvm::MemoryBuffer* srcbuf, llvm::raw_string_ostream *ostream) const
+Module::execPreprocessor(const char *infilename, llvm::raw_string_ostream *ostream) const
 {
     clang::CompilerInstance inst;
     inst.createFileManager();
@@ -2495,7 +2467,7 @@ Module::execPreprocessor(llvm::MemoryBuffer* srcbuf, llvm::raw_string_ostream *o
 
     inst.setTarget(target);
     inst.createSourceManager(inst.getFileManager());
-    clang::FrontendInputFile inputFile(srcbuf, clang::IK_None);
+    clang::FrontendInputFile inputFile(infilename, clang::IK_None);
     inst.InitializeSourceManager(inputFile);
 
     // Don't remove comments in the preprocessor, so that we can accurately
@@ -3244,7 +3216,7 @@ Module::CompileAndOutput(const char *srcFile,
                 bool check = (dispatchModule != NULL);
                 if (!check)
                     dispatchModule = lInitDispatchModule();
-                lExtractOrCheckGlobals(m->module.get(), dispatchModule, check);
+                lExtractOrCheckGlobals(m->module, dispatchModule, check);
 
                 // Grab pointers to the exported functions from the module we
                 // just compiled, for use in generating the dispatch function

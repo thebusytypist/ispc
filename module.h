@@ -50,8 +50,6 @@
 namespace llvm
 {
     class raw_string_ostream;
-    class MemoryBuffer;
-    class ExecutionEngine;
 }
 
 struct DispatchHeaderInfo;
@@ -66,12 +64,6 @@ public:
         its global variables and functions to both the llvm::Module and
         SymbolTable.  Returns the number of errors during compilation.  */
     int CompileFile();
-
-    /** Compiles the src string. */
-    int CompileAndJIT(const char* src);
-
-    /** Get the address of JIT function by name. */
-    uint64_t GetFunctionAddress(const std::string& name);
 
     /** Add a named type definition to the module. */
     void AddTypeDef(const std::string &name, const Type *type,
@@ -163,7 +155,7 @@ public:
     SymbolTable *symbolTable;
 
     /** llvm Module object into which globals and functions are added. */
-    std::unique_ptr<llvm::Module> module;
+    llvm::Module *module;
 
     /** The diBuilder manages generating debugging information */
     llvm::DIBuilder *diBuilder;
@@ -179,8 +171,6 @@ private:
     AST *ast;
 
     std::vector<std::pair<const Type *, SourcePos> > exportedTypes;
-
-    llvm::ExecutionEngine* executionEngine;
 
     /** Write the corresponding output type to the given file.  Returns
         true on success, false if there has been an error.  The given
@@ -200,10 +190,7 @@ private:
                                           const char *outFileName);
     static bool writeBitcode(llvm::Module *module, const char *outFileName);
 
-    void execPreprocessor(llvm::MemoryBuffer* srcbuf,
-                          llvm::raw_string_ostream* ostream) const;
-
-    int compile(std::unique_ptr<llvm::MemoryBuffer> srcbuf);
+    void execPreprocessor(const char *infilename, llvm::raw_string_ostream* ostream) const;
 };
 
 #endif // ISPC_MODULE_H

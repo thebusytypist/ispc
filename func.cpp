@@ -568,7 +568,7 @@ Function::GenerateIR() {
                 }
 #endif /* ISPC_NVPTX_ENABLED */
                 llvm::Function *appFunction =
-                    llvm::Function::Create(ftype, linkage, functionName.c_str(), m->module.get());
+                    llvm::Function::Create(ftype, linkage, functionName.c_str(), m->module);
                 appFunction->setDoesNotThrow();
 
                 // We should iterate from 1 because zero parameter is return.
