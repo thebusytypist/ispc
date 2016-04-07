@@ -890,9 +890,9 @@ AddBitcodeToModule(const unsigned char *bitcode, int length,
         bcModule->setTargetTriple(mTriple.str());
         bcModule->setDataLayout(module->getDataLayout());
 
+#if ISPC_LLVM_VERSION <= ISPC_LLVM_3_5 // 3.2-3.5
         std::string(linkError);
 
-#if ISPC_LLVM_VERSION <= ISPC_LLVM_3_5 // 3.2-3.5
         if (llvm::Linker::LinkModules(module, bcModule,
                                       llvm::Linker::DestroySource,
                                       &linkError))
@@ -900,8 +900,24 @@ AddBitcodeToModule(const unsigned char *bitcode, int length,
 #elif ISPC_LLVM_VERSION <= ISPC_LLVM_3_7 // 3.6-3.7
         llvm::Linker::LinkModules(module, bcModule);
 #else // LLVM 3.8+
-        // TODO: Pass diagnostic function for proper error reporting.
-        llvm::Linker::linkModules(*module, *bcModule, nullptr);
+        // A hack to move over declaration, which have no definition.
+        // New linker is kind of smart and think it knows better what to do, so
+        // it removes unused declarations without definitions.
+        // This trick should be legal, as both modules use the same LLVMContext.
+        for (llvm::Function& f : *bcModule) {
+          if (f.isDeclaration()) {
+            // Declarations with uses will be moved by Linker.
+            if (f.getNumUses() > 0)
+              continue;
+            module->getOrInsertFunction(f.getName(), f.getFunctionType(),
+                f.getAttributes());
+          }
+        }
+
+        std::unique_ptr<llvm::Module> M(bcModule);
+        if (llvm::Linker::linkModules(*module, std::move(M))) {
+            Error(SourcePos(), "Error linking stdlib bitcode.");
+        }
 #endif
 
         lSetInternalFunctions(module);
@@ -1354,6 +1370,23 @@ DefineStdlib(SymbolTable *symbolTable, llvm::LLVMContext *ctx, llvm::Module *mod
             }
             else {
                 EXPORT_MODULE(builtins_bitcode_knl_64bit);
+            }
+            break;
+        default:
+            FATAL("logic error in DefineStdlib");
+        }
+        break;
+    }
+#endif
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_3_8 // LLVM 3.8+
+    case Target::SKX_AVX512: {
+        switch (g->target->getVectorWidth()) {
+        case 16:
+            if (runtime32) {
+                EXPORT_MODULE(builtins_bitcode_skx_32bit);
+            }
+            else {
+                EXPORT_MODULE(builtins_bitcode_skx_64bit);
             }
             break;
         default:

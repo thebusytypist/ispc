@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2010-2015, Intel Corporation
+  Copyright (c) 2010-2016, Intel Corporation
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -111,6 +111,10 @@
 #if ISPC_LLVM_VERSION >= ISPC_LLVM_3_8 // LLVM 3.8+
   #include <llvm/Analysis/BasicAliasAnalysis.h>
   #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
+#endif
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_3_9 // LLVM 3.9+
+  #include "llvm/Transforms/IPO/FunctionAttrs.h"
+  #include "llvm/Transforms/Scalar/GVN.h"
 #endif
 #include <llvm/Analysis/Passes.h>
 #include <llvm/Support/raw_ostream.h>
@@ -672,7 +676,15 @@ Optimize(llvm::Module *module, int optLevel) {
         optPM.add(llvm::createInstructionCombiningPass());
         optPM.add(llvm::createCFGSimplificationPass());
         optPM.add(llvm::createPruneEHPass());
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_3_9 // 3.9+
+        optPM.add(llvm::createPostOrderFunctionAttrsLegacyPass());
+        optPM.add(llvm::createReversePostOrderFunctionAttrsPass());
+#elif ISPC_LLVM_VERSION == ISPC_LLVM_3_8 // 3.8
+        optPM.add(llvm::createPostOrderFunctionAttrsPass());
+        optPM.add(llvm::createReversePostOrderFunctionAttrsPass());
+#else // 3.7 and earlier
         optPM.add(llvm::createFunctionAttrsPass());
+#endif
         optPM.add(llvm::createFunctionInliningPass());
         optPM.add(llvm::createConstantPropagationPass());
         optPM.add(llvm::createDeadInstEliminationPass());
@@ -929,7 +941,7 @@ Optimize(llvm::Module *module, int optLevel) {
 */
 class IntrinsicsOpt : public llvm::BasicBlockPass {
 public:
-    IntrinsicsOpt();
+    IntrinsicsOpt() : BasicBlockPass(ID) {};
 
     const char *getPassName() const { return "Intrinsics Cleanup Optimization"; }
     bool runOnBasicBlock(llvm::BasicBlock &BB);
@@ -972,39 +984,6 @@ private:
 char IntrinsicsOpt::ID = 0;
 
 
-IntrinsicsOpt::IntrinsicsOpt()
-    : BasicBlockPass(ID) {
-
-    // All of the mask instructions we may encounter.  Note that even if
-    // compiling for AVX, we may still encounter the regular 4-wide SSE
-    // MOVMSK instruction.
-    if (llvm::Function *ssei8Movmsk =
-        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse2_pmovmskb_128))) {
-        maskInstructions.push_back(ssei8Movmsk);
-    }
-    if (llvm::Function *sseFloatMovmsk =
-        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse_movmsk_ps))) {
-        maskInstructions.push_back(sseFloatMovmsk);
-    }
-    if (llvm::Function *__movmsk = 
-        m->module->getFunction("__movmsk")) {
-        maskInstructions.push_back(__movmsk);
-    }
-    if (llvm::Function *avxFloatMovmsk =
-        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_avx_movmsk_ps_256))) {
-        maskInstructions.push_back(avxFloatMovmsk);
-    }
-
-    // And all of the blend instructions
-    blendInstructions.push_back(BlendInstruction(
-        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse41_blendvps)),
-        0xf, 0, 1, 2));
-    blendInstructions.push_back(BlendInstruction(
-        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_avx_blendv_ps_256)),
-        0xff, 0, 1, 2));
-}
-
-
 /** Given an llvm::Value, return true if we can determine that it's an
     undefined value.  This only makes a weak attempt at chasing this down,
     only detecting flat-out undef values, and bitcasts of undef values.
@@ -1030,6 +1009,37 @@ lIsUndef(llvm::Value *value) {
 bool
 IntrinsicsOpt::runOnBasicBlock(llvm::BasicBlock &bb) {
     DEBUG_START_PASS("IntrinsicsOpt");
+
+    // We can’t initialize mask/blend function vector during pass initialization,
+    // as they may be optimized out by the time the pass is invoked.
+
+    // All of the mask instructions we may encounter.  Note that even if
+    // compiling for AVX, we may still encounter the regular 4-wide SSE
+    // MOVMSK instruction.
+    if (llvm::Function *ssei8Movmsk =
+        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse2_pmovmskb_128))) {
+        maskInstructions.push_back(ssei8Movmsk);
+    }
+    if (llvm::Function *sseFloatMovmsk =
+        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse_movmsk_ps))) {
+        maskInstructions.push_back(sseFloatMovmsk);
+    }
+    if (llvm::Function *__movmsk =
+        m->module->getFunction("__movmsk")) {
+        maskInstructions.push_back(__movmsk);
+    }
+    if (llvm::Function *avxFloatMovmsk =
+        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_avx_movmsk_ps_256))) {
+        maskInstructions.push_back(avxFloatMovmsk);
+    }
+
+    // And all of the blend instructions
+    blendInstructions.push_back(BlendInstruction(
+        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_sse41_blendvps)),
+        0xf, 0, 1, 2));
+    blendInstructions.push_back(BlendInstruction(
+        m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_avx_blendv_ps_256)),
+        0xff, 0, 1, 2));
 
     llvm::Function *avxMaskedLoad32 =
         m->module->getFunction(llvm::Intrinsic::getName(llvm::Intrinsic::x86_avx_maskload_ps_256));

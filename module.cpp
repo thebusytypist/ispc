@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2010-2015, Intel Corporation
+  Copyright (c) 2010-2016, Intel Corporation
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -494,6 +494,12 @@ Module::CompileFile() {
         yyparse();
         fclose(f);
     }
+
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_3_7 // LLVM 3.7+
+    if (g->NoOmitFramePointer)
+        for (llvm::Function& f : *module)
+            f.addFnAttr("no-frame-pointer-elim", "true");
+#endif
 
     ast->GenerateIR();
 
@@ -2803,10 +2809,8 @@ lCreateDispatchFunction(llvm::Module *module, llvm::Function *setISAFunc,
             !g->target->getTreatGenericAsSmth().empty()) {
             if (g->target->getTreatGenericAsSmth() == "knl_generic")
                 dispatchNum = Target::KNL_AVX512;
-            else if (g->target->getTreatGenericAsSmth() == "skx_generic")
-                dispatchNum = Target::SKX;
             else {
-                Error(SourcePos(), "*-generic target can be called only with knl or skx");
+                Error(SourcePos(), "*-generic target can be called only with knl");
                 exit(1);
             }
         }
@@ -3242,6 +3246,9 @@ Module::CompileAndOutput(const char *srcFile,
                 }
             }
             errorCount += m->errorCount;
+            if (errorCount != 0) {
+                return 1;
+            }
 
             // Only write the generate header file, if desired, the first
             // time through the loop here.

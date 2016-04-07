@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-#  Copyright (c) 2013-2015, Intel Corporation
+#  Copyright (c) 2013-2016, Intel Corporation
 #  All rights reserved.
 # 
 #  Redistribution and use in source and binary forms, with or without
@@ -124,6 +124,9 @@ def build_LLVM(version_LLVM, revision, folder, tarball, debug, selfbuild, extra,
     FOLDER_NAME=version_LLVM
     if  version_LLVM == "trunk":
         SVN_PATH="trunk"
+    if  version_LLVM == "3.8":
+        SVN_PATH="tags/RELEASE_380/final"
+        version_LLVM = "3_8"
     if  version_LLVM == "3.7":
         SVN_PATH="tags/RELEASE_370/final"
         version_LLVM = "3_7"
@@ -244,45 +247,92 @@ def build_LLVM(version_LLVM, revision, folder, tarball, debug, selfbuild, extra,
         os.makedirs(LLVM_BUILD_selfbuild)
         os.makedirs(LLVM_BIN_selfbuild)
         os.chdir(LLVM_BUILD_selfbuild)
-        try_do_LLVM("configure release version for selfbuild ",
-                    "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" +
-                    LLVM_BIN_selfbuild + " --enable-optimized" +
-                    " --enable-targets=x86,x86_64,nvptx" +
-                    ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
-                    mac_system_root,
+        if  version_LLVM == "trunk":
+            # TODO: mac_root
+            try_do_LLVM("configure release version for selfbuild ",
+                    "cmake -G Unix\ Makefiles" + " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" +
+                    "  -DCMAKE_INSTALL_PREFIX=" + llvm_home + "/" + LLVM_BIN_selfbuild +
+                    "  -DCMAKE_BUILD_TYPE=Release" +
+                    "  -DLLVM_ENABLE_ASSERTIONS=ON" +
+                    (("  -DGCC_INSTALL_PREFIX=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                    (("  -DCMAKE_C_COMPILER=" + gcc_toolchain_path+"/bin/gcc") if gcc_toolchain_path != "" else "") +
+                    (("  -DCMAKE_CXX_COMPILER=" + gcc_toolchain_path+"/bin/g++") if gcc_toolchain_path != "" else "") +
+                    "  -DLLVM_TARGETS_TO_BUILD=NVPTX\;X86" +
+                    " ../" + LLVM_SRC,
                     from_validation)
+            selfbuild_compiler = ("  -DCMAKE_C_COMPILER=" +llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang " +
+                                  "  -DCMAKE_CXX_COMPILER="+llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang++ ")
+        else:
+            try_do_LLVM("configure release version for selfbuild ",
+                        "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" +
+                        LLVM_BIN_selfbuild + " --enable-optimized" +
+                        " --enable-targets=x86,x86_64,nvptx" +
+                        ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                        mac_system_root,
+                        from_validation)
+            selfbuild_compiler = ("CC=" +llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang " +
+                                  "CXX="+llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang++ ")
         try_do_LLVM("build release version for selfbuild ",
                     make, from_validation)
         try_do_LLVM("install release version for selfbuild ",
                     "make install",
                     from_validation)
         os.chdir("../")
-        selfbuild_compiler = ("CC=" +llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang " +
-                              "CXX="+llvm_home+ "/" + LLVM_BIN_selfbuild + "/bin/clang++ ")
+
         print_debug("Now we have compiler for selfbuild: " + selfbuild_compiler + "\n", from_validation, alloy_build)
     os.chdir(LLVM_BUILD)
     if debug == False:
         if current_OS != "Windows":
-            try_do_LLVM("configure release version ",
-                    selfbuild_compiler + "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" +
-                    LLVM_BIN + " --enable-optimized" +
-                    " --enable-targets=x86,x86_64,nvptx" +
-                    ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
-                    mac_system_root,
-                    from_validation)
+            if  version_LLVM == "trunk":
+                # TODO: mac_root
+                try_do_LLVM("configure release version ",
+                        "cmake -G Unix\ Makefiles" + " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" +
+                        selfbuild_compiler +
+                        "  -DCMAKE_INSTALL_PREFIX=" + llvm_home + "/" + LLVM_BIN +
+                        "  -DCMAKE_BUILD_TYPE=Release" +
+                        "  -DLLVM_ENABLE_ASSERTIONS=ON" +
+                        (("  -DGCC_INSTALL_PREFIX=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                        (("  -DCMAKE_C_COMPILER=" + gcc_toolchain_path+"/bin/gcc") if gcc_toolchain_path != "" and selfbuild_compiler == "" else "") +
+                        (("  -DCMAKE_CXX_COMPILER=" + gcc_toolchain_path+"/bin/g++") if gcc_toolchain_path != "" and selfbuild_compiler == "" else "") +
+                        "  -DLLVM_TARGETS_TO_BUILD=NVPTX\;X86" +
+                        " ../" + LLVM_SRC,
+                        from_validation)
+            else:
+                try_do_LLVM("configure release version ",
+                        selfbuild_compiler + "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" +
+                        LLVM_BIN + " --enable-optimized" +
+                        " --enable-targets=x86,x86_64,nvptx" +
+                        ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                        mac_system_root,
+                        from_validation)
         else:
             try_do_LLVM("configure release version ",
                     'cmake -G "Visual Studio 12" -DCMAKE_INSTALL_PREFIX="..\\'+ LLVM_BIN +
                     '" -DLLVM_LIT_TOOLS_DIR="C:\\gnuwin32\\bin" ..\\' + LLVM_SRC,
                     from_validation)
     else:
-        try_do_LLVM("configure debug version ",
-                    selfbuild_compiler + "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" + LLVM_BIN +
-                    " --enable-debug-runtime --enable-debug-symbols --enable-keep-symbols" +
-                    " --enable-targets=x86,x86_64,nvptx" +
-                    ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
-                    mac_system_root,
+        if  version_LLVM == "trunk":
+            # TODO: mac_root
+            try_do_LLVM("configure debug version ",
+                    "cmake -G Unix\ Makefiles" + " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" +
+                    selfbuild_compiler +
+                    "  -DCMAKE_INSTALL_PREFIX=" + llvm_home + "/" + LLVM_BIN +
+                    "  -DCMAKE_BUILD_TYPE=Debug" +
+                    "  -DLLVM_ENABLE_ASSERTIONS=ON" +
+                    (("  -DGCC_INSTALL_PREFIX=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                    (("  -DCMAKE_C_COMPILER=" + gcc_toolchain_path+"/bin/gcc") if gcc_toolchain_path != "" and selfbuild_compiler == "" else "") +
+                    (("  -DCMAKE_CXX_COMPILER=" + gcc_toolchain_path+"/bin/g++") if gcc_toolchain_path != "" and selfbuild_compiler == "" else "") +
+                    "  -DLLVM_TARGETS_TO_BUILD=NVPTX\;X86" +
+                    " ../" + LLVM_SRC,
                     from_validation)
+        else:
+            try_do_LLVM("configure debug version ",
+                        selfbuild_compiler + "../" + LLVM_SRC + "/configure --prefix=" + llvm_home + "/" + LLVM_BIN +
+                        " --enable-debug-runtime --enable-debug-symbols --enable-keep-symbols" +
+                        " --enable-targets=x86,x86_64,nvptx" +
+                        ((" --with-gcc-toolchain=" + gcc_toolchain_path) if gcc_toolchain_path != "" else "") +
+                        mac_system_root,
+                        from_validation)
     # building llvm
     if current_OS != "Windows":
         try_do_LLVM("build LLVM ", make, from_validation)
@@ -293,13 +343,14 @@ def build_LLVM(version_LLVM, revision, folder, tarball, debug, selfbuild, extra,
 
 
 def unsupported_llvm_targets(LLVM_VERSION):
-    prohibited_list = {"3.2":["avx512knl-i32x16"],
-                       "3.3":["avx512knl-i32x16"],
-                       "3.4":["avx512knl-i32x16"],
-                       "3.5":["avx512knl-i32x16"],
-                       "3.6":["avx512knl-i32x16"],
-                       "3.7":[],
+    prohibited_list = {"3.2":["avx512knl-i32x16", "avx512skx-i32x16"],
+                       "3.3":["avx512knl-i32x16", "avx512skx-i32x16"],
+                       "3.4":["avx512knl-i32x16", "avx512skx-i32x16"],
+                       "3.5":["avx512knl-i32x16", "avx512skx-i32x16"],
+                       "3.6":["avx512knl-i32x16", "avx512skx-i32x16"],
+                       "3.7":["avx512skx-i32x16"],
                        "3.8":[],
+                       "3.9":[],
                        "trunk":[]}   
     return prohibited_list[LLVM_VERSION]
 
@@ -326,9 +377,10 @@ def check_targets():
     AVX11 = ["avx1.1-i32x8","avx1.1-i32x16","avx1.1-i64x4"]
     AVX2  = ["avx2-i32x8",  "avx2-i32x16",  "avx2-i64x4"]
     KNL   = ["knl-generic", "avx512knl-i32x16"]
+    SKX   = ["avx512skx-i32x16"]
 
     targets = [["AVX2", AVX2, False], ["AVX1.1", AVX11, False], ["AVX", AVX, False], ["SSE4", SSE4, False], 
-               ["SSE2", SSE2, False], ["KNL", KNL, False]]
+               ["SSE2", SSE2, False], ["KNL", KNL, False], ["SKX", SKX, False]]
     f_lines = take_lines("check_isa.exe", "first")
     for i in range(0,5):
         if targets[i][0] in f_lines:
@@ -352,6 +404,8 @@ def check_targets():
     # here we have SDE
     f_lines = take_lines(sde_exists + " -help", "all")
     for i in range(0,len(f_lines)):
+        if targets[6][2] == False and "skx" in f_lines[i]:
+            answer_sde = answer_sde + [["-skx", "avx512skx-i32x16"]]
         if targets[5][2] == False and "knl" in f_lines[i]:
             answer_sde = answer_sde + [["-knl", "knl-generic"], ["-knl", "avx512knl-i32x16"]]
         if targets[3][2] == False and "wsm" in f_lines[i]:
@@ -419,8 +473,10 @@ def build_ispc(version_LLVM, make):
             temp = "3_6"
         if version_LLVM == "3.7":
             temp = "3_7"
-        if version_LLVM == "trunk":
+        if version_LLVM == "3.8":
             temp = "3_8"
+        if version_LLVM == "trunk":
+            temp = "3_9"
         os.environ["LLVM_VERSION"] = "LLVM_" + temp
         try_do_LLVM("clean ISPC for building", "msbuild ispc.vcxproj /t:clean", True)
         try_do_LLVM("build ISPC with LLVM version " + version_LLVM + " ", "msbuild ispc.vcxproj /V:m /p:Platform=Win32 /p:Configuration=Release /t:rebuild", True)
@@ -560,7 +616,7 @@ def validation_run(only, only_targets, reference_branch, number, notify, update,
             archs.append("x86-64")
         if "native" in only:
             sde_targets_t = []
-        for i in ["3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "trunk"]:
+        for i in ["3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "trunk"]:
             if i in only:
                 LLVM.append(i)
         if "current" in only:
@@ -674,7 +730,10 @@ def validation_run(only, only_targets, reference_branch, number, notify, update,
                 # *always* specify default values for global variables on each loop iteration
                 stability.wrapexe = ""
                 stability.compiler_exe = None
-
+                # choosing right compiler for a given target
+                # sometimes clang++ is not avaluable. if --ispc-build-compiler = gcc we will pass in g++ compiler
+                if options.ispc_build_compiler == "gcc":
+                    stability.compiler_exe = "g++"
                 if ("knc-generic" in stability.target) or ("knl-generic" in stability.target):
                     stability.compiler_exe = "icpc"
                 stability.wrapexe = get_sde() + " " + sde_targets[j][0] + " -- "
@@ -843,7 +902,7 @@ def Main():
         if os.environ.get("SMTP_ISPC") == None:
             error("you have no SMTP_ISPC in your environment for option notify", 1)
     if options.only != "":
-        test_only_r = " 3.2 3.3 3.4 3.5 3.6 3.7 trunk current build stability performance x86 x86-64 x86_64 -O0 -O2 native debug nodebug "
+        test_only_r = " 3.2 3.3 3.4 3.5 3.6 3.7 3.8 trunk current build stability performance x86 x86-64 x86_64 -O0 -O2 native debug nodebug "
         test_only = options.only.split(" ")
         for iterator in test_only:
             if not (" " + iterator + " " in test_only_r):
@@ -953,7 +1012,7 @@ if __name__ == '__main__':
     llvm_group = OptionGroup(parser, "Options for building LLVM",
                     "These options must be used with -b option.")
     llvm_group.add_option('--version', dest='version',
-        help='version of llvm to build: 3.2 3.3 3.4 3.5 3.6 3.7 trunk. Default: trunk', default="trunk")
+        help='version of llvm to build: 3.2 3.3 3.4 3.5 3.6 3.7 3.8 trunk. Default: trunk', default="trunk")
     llvm_group.add_option('--with-gcc-toolchain', dest='gcc_toolchain_path',
          help='GCC install dir to use when building clang. It is important to set when ' +
          'you have alternative gcc installation. Note that otherwise gcc from standard ' +
@@ -994,7 +1053,7 @@ if __name__ == '__main__':
     run_group.add_option('--only', dest='only',
         help='set types of tests. Possible values:\n' + 
             '-O0, -O2, x86, x86-64, stability (test only stability), performance (test only performance),\n' +
-            'build (only build with different LLVM), 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, trunk, native (do not use SDE),\n' +
+            'build (only build with different LLVM), 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, trunk, native (do not use SDE),\n' +
             'current (do not rebuild ISPC), debug (only with debug info), nodebug (only without debug info, default).',
             default="")
     run_group.add_option('--perf_LLVM', dest='perf_llvm',

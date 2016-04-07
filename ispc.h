@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2010-2015, Intel Corporation
+  Copyright (c) 2010-2016, Intel Corporation
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -41,7 +41,7 @@
 #include "ispc_version.h"
 
 #if ISPC_LLVM_VERSION < OLDEST_SUPPORTED_LLVM || ISPC_LLVM_VERSION > LATEST_SUPPORTED_LLVM
-#error "Only LLVM 3.2, 3.3, 3.4, 3.5, 3.6, 3.7 and 3.8 development branch are supported"
+#error "Only LLVM 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8 and 3.9 development branch are supported"
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -193,7 +193,7 @@ public:
         AVX11          = 3,
         AVX2           = 4,
         KNL_AVX512     = 5,
-        SKX            = 6,
+        SKX_AVX512     = 6,
         GENERIC        = 7,
 #ifdef ISPC_NVPTX_ENABLED
         NVPTX,
@@ -561,6 +561,9 @@ struct Globals {
 
     /** When \c true, target ISA will be printed during ispc's execution. */
     bool printTarget;
+
+    /** When \c true, LLVM won't omit frame pointer. */
+    bool NoOmitFramePointer;
 
     /** Indicates which stages of optimization we want to dump. */
     std::set<int> debug_stages;

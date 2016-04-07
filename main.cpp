@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2010-2015, Intel Corporation
+  Copyright (c) 2010-2016, Intel Corporation
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -56,14 +56,28 @@
 #define BUILD_DATE __DATE__
 #endif
 #define BUILD_VERSION ""
+#if _MSC_VER >= 1900
+#define ISPC_VS_VERSION "Visual Studio 2015 and later"
+#else
+#define ISPC_VS_VERSION "Visual Studio 2013 and earlier"
+#endif
 #endif // ISPC_IS_WINDOWS
 
 static void
 lPrintVersion() {
+#ifdef ISPC_IS_WINDOWS
+    printf("Intel(r) SPMD Program Compiler (ispc), %s (build date %s, LLVM %s)\n"
+           "Supported Visual Studio versions: %s.\n",
+           ISPC_VERSION, BUILD_DATE,
+           ISPC_LLVM_VERSION_STRING,
+           ISPC_VS_VERSION
+           );
+#else
     printf("Intel(r) SPMD Program Compiler (ispc), %s (build %s @ %s, LLVM %s)\n",
            ISPC_VERSION, BUILD_VERSION, BUILD_DATE,
            ISPC_LLVM_VERSION_STRING
            );
+#endif
 }
 
 
@@ -108,6 +122,7 @@ usage(int ret) {
     printf("        svml\t\t\t\tUse the Intel(r) SVML math libraries\n");
     printf("        system\t\t\t\tUse the system's math library (*may be quite slow*)\n");
     printf("    [-MMM <filename>\t\t\t\tWrite #include dependencies to given file.\n");
+    printf("    [--no-omit-frame-pointer]\t\tDisable frame pointer omission. It may be useful for profiling\n");
     printf("    [--nostdlib]\t\t\tDon't make the ispc standard library available\n");
     printf("    [--nocpp]\t\t\t\tDon't run the C preprocessor\n");
     printf("    [-o <name>/--outfile=<name>]\tOutput filename (may be \"-\" for standard output)\n");
@@ -374,6 +389,8 @@ int main(int Argc, char *Argv[]) {
 #endif
         else if (!strcmp(argv[i], "--print-target"))
             g->printTarget = true;
+        else if (!strcmp(argv[i], "--no-omit-frame-pointer"))
+            g->NoOmitFramePointer = true;
         else if (!strcmp(argv[i], "--instrument"))
             g->emitInstrumentation = true;
         else if (!strcmp(argv[i], "-g")) {

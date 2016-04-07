@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2010-2015, Intel Corporation
+#  Copyright (c) 2010-2016, Intel Corporation
 #  All rights reserved.
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -89,7 +89,8 @@ else
 endif
 ARCH_TYPE = $(shell arch)
 
-LLVM_CXXFLAGS=$(shell $(LLVM_CONFIG) --cppflags)
+DNDEBUG_FLAG=$(shell $(LLVM_CONFIG) --cxxflags | grep -o "\-DNDEBUG")
+LLVM_CXXFLAGS=$(shell $(LLVM_CONFIG) --cppflags) $(DNDEBUG_FLAG)
 LLVM_VERSION=LLVM_$(shell $(LLVM_CONFIG) --version | sed -e 's/svn//' -e 's/\./_/' -e 's/\..*//')
 LLVM_VERSION_DEF=-D$(LLVM_VERSION)
 
@@ -201,7 +202,7 @@ HEADERS=ast.h builtins.h ctx.h decl.h expr.h func.h ispc.h llvmutil.h module.h \
 	opt.h stmt.h sym.h type.h util.h
 TARGETS=avx2-i64x4 avx11-i64x4 avx1-i64x4 avx1 avx1-x2 avx11 avx11-x2 avx2 avx2-x2 \
 	sse2 sse2-x2 sse4-8 sse4-16 sse4 sse4-x2 \
-	generic-4 generic-8 generic-16 generic-32 generic-64 generic-1 knl
+	generic-4 generic-8 generic-16 generic-32 generic-64 generic-1 knl skx
 ifneq ($(ARM_ENABLED), 0)
     TARGETS+=neon-32 neon-16 neon-8
 endif

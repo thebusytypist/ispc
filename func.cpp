@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2011-2015, Intel Corporation
+  Copyright (c) 2011-2016, Intel Corporation
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -247,6 +247,11 @@ Function::emitCode(FunctionEmitContext *ctx, llvm::Function *function,
     // add debugging info for __mask
     maskSymbol->pos = firstStmtPos;
     ctx->EmitVariableDebugInfo(maskSymbol);
+
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_3_7 // LLVM 3.7+
+    if (g->NoOmitFramePointer)
+        function->addFnAttr("no-frame-pointer-elim", "true");
+#endif
 
 #if 0
     llvm::BasicBlock *entryBBlock = ctx->GetCurrentBasicBlock();
